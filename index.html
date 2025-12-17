@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bambooangler backend</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+
+    <div id="loginPage" class="flex items-center justify-center h-screen">
+        <div class="bg-white p-8 rounded-lg shadow-xl w-96">
+            <div class="flex flex-col items-center justify-center mb-6">
+    <img src="Logo.png.png" class="h-20 w-auto mb-4 object-contain">
+    <h2 class="text-2xl font-bold text-center text-blue-900">BambooAngler backend</h2>
+</div>
+            <input type="email" id="email" placeholder="管理員信箱" class="w-full p-3 border rounded mb-4">
+            <input type="password" id="password" placeholder="密碼" class="w-full p-3 border rounded mb-6">
+            <button onclick="login()" class="w-full bg-blue-600 text-white p-3 rounded font-bold hover:bg-blue-700 transition">登入系統</button>
+            <p id="loginError" class="text-red-500 text-center mt-4 hidden">帳號或密碼錯誤</p>
+        </div>
+    </div>
+
+    <div id="dashboard" class="hidden min-h-screen pb-10">
+        <nav class="bg-blue-900 text-white p-4 flex justify-between items-center shadow-md">
+            <div class="flex items-center gap-3">
+    <img src="Logo.png.png" class="h-10 w-10 bg-white rounded-full p-1 object-contain"> 
+    <h1 class="text-xl font-bold">BambooAngler backend</h1>
+</div>
+            <button onclick="logout()" class="bg-red-500 px-4 py-2 rounded text-sm hover:bg-red-600">登出</button>
+        </nav>
+
+        <div class="container mx-auto p-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div class="bg-white p-6 rounded-lg shadow border-l-4 border-blue-500">
+                    <p class="text-gray-500 text-sm">庫存總成本</p>
+                    <h3 class="text-2xl font-bold" id="totalCostDisplay">$0</h3>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow border-l-4 border-green-500">
+                    <p class="text-gray-500 text-sm">庫存全銷預估淨利</p>
+                    <h3 class="text-2xl font-bold text-green-600" id="totalProjectedProfit">$0</h3>
+                    <p class="text-xs text-gray-400">若當前庫存全部賣出</p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow border-l-4 border-red-500">
+                    <p class="text-gray-500 text-sm">建議淘汰商品數</p>
+                    <h3 class="text-2xl font-bold text-red-600" id="alertCount">0 項</h3>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow mb-8">
+                <h2 class="text-lg font-bold mb-4 border-b pb-2">📦 進貨與定價計算機</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+                    <div><label class="text-xs text-gray-500">商品名稱</label><input type="text" id="pName" class="w-full p-2 border rounded"></div>
+                    <div><label class="text-xs text-gray-500">進貨成本 ($)</label><input type="number" id="pCost" oninput="calculatePrice()" class="w-full p-2 border rounded"></div>
+                    <div><label class="text-xs text-gray-500">期望毛利率 (%)</label><input type="number" id="pMargin" value="30" oninput="calculatePrice()" class="w-full p-2 border rounded"></div>
+                    <div><label class="text-xs text-gray-500">建議售價</label><input type="number" id="pPrice" class="w-full p-2 border rounded bg-gray-50 font-bold text-blue-600"></div>
+                    <div><label class="text-xs text-gray-500">進貨數量</label><input type="number" id="pStock" class="w-full p-2 border rounded"></div>
+                </div>
+                <button onclick="addProduct()" class="mt-4 w-full bg-green-600 text-white py-2 rounded hover:bg-green-700">確認進貨並儲存</button>
+            </div>
+
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <h2 class="text-lg font-bold p-6 border-b">📊 商品庫存列表</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="p-4 text-sm text-gray-500">商品</th>
+                                <th class="p-4 text-sm text-gray-500">成本/售價</th>
+                                <th class="p-4 text-sm text-gray-500">毛利</th>
+                                <th class="p-4 text-sm text-gray-500">庫存/已售</th>
+                                <th class="p-4 text-sm text-gray-500">預估淨利</th>
+                                <th class="p-4 text-sm text-gray-500">建議</th>
+                                <th class="p-4 text-sm text-gray-500">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="productTable" class="divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // ==========================================
+        // ↓↓↓ 請在這裡貼上你自己的 Firebase Config ↓↓↓
+        // ==========================================
+        const firebaseConfig = {
+  apiKey: "AIzaSyBl60O2JJPs7Zs9BXuliL5IgJoY_fPnWf4",
+  authDomain: "bambooanglerbackend-94454.firebaseapp.com",
+  projectId: "bambooanglerbackend-94454",
+  storageBucket: "bambooanglerbackend-94454.firebasestorage.app",
+  messagingSenderId: "952858498054",
+  appId: "1:952858498054:web:314ec6743c170f4dff9f87"
+};
+
+        // ==========================================
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // 登入檢查
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                document.getElementById('loginPage').classList.add('hidden');
+                document.getElementById('dashboard').classList.remove('hidden');
+                loadProducts();
+            } else {
+                document.getElementById('loginPage').classList.remove('hidden');
+                document.getElementById('dashboard').classList.add('hidden');
+            }
+        });
+
+        window.login = async () => {
+            try {
+                await signInWithEmailAndPassword(auth, document.getElementById('email').value, document.getElementById('password').value);
+            } catch (error) {
+                document.getElementById('loginError').classList.remove('hidden');
+            }
+        };
+
+        window.logout = () => signOut(auth);
+
+        // 計算建議售價
+        window.calculatePrice = () => {
+            const cost = Number(document.getElementById('pCost').value);
+            const margin = Number(document.getElementById('pMargin').value);
+            if(cost && margin) {
+                document.getElementById('pPrice').value = Math.round(cost / (1 - (margin / 100)));
+            }
+        };
+
+        // 新增商品
+        window.addProduct = async () => {
+            const name = document.getElementById('pName').value;
+            const cost = Number(document.getElementById('pCost').value);
+            const price = Number(document.getElementById('pPrice').value);
+            const stock = Number(document.getElementById('pStock').value);
+            if(!name || !cost || !price) return alert("資料不完整");
+
+            await addDoc(collection(db, "products"), { name, cost, price, stock, sold: 0, date: new Date().toISOString() });
+            
+            document.getElementById('pName').value = '';
+            document.getElementById('pCost').value = '';
+            document.getElementById('pPrice').value = '';
+            document.getElementById('pStock').value = '';
+        };
+
+        // 讀取列表
+        function loadProducts() {
+            onSnapshot(collection(db, "products"), (snapshot) => {
+                const tbody = document.getElementById('productTable');
+                tbody.innerHTML = '';
+                let tCost = 0, tProfit = 0, alertC = 0;
+
+                snapshot.forEach(docSnap => {
+                    const d = docSnap.data();
+                    const margin = Math.round(((d.price - d.cost) / d.price) * 100);
+                    const potProfit = (d.price - d.cost) * d.stock;
+                    
+                    tCost += (d.cost * d.stock);
+                    tProfit += potProfit;
+
+                    let status = '<span class="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">正常</span>';
+                    if (d.stock > 5 && d.sold < 1) { status = '<span class="px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-bold">滯銷建議淘汰</span>'; alertC++; }
+                    else if (margin < 10) { status = '<span class="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs">低毛利</span>'; }
+
+                    tbody.innerHTML += `
+                        <tr class="hover:bg-gray-50 border-b">
+                            <td class="p-4 font-medium">${d.name}</td>
+                            <td class="p-4 text-xs">成本$${d.cost}<br><span class="text-blue-600 text-base font-bold">$${d.price}</span></td>
+                            <td class="p-4">${margin}%</td>
+                            <td class="p-4 font-bold">${d.stock} <span class="text-gray-400 font-normal">/ ${d.sold}</span></td>
+                            <td class="p-4 text-green-600 font-bold">+$${potProfit}</td>
+                            <td class="p-4">${status}</td>
+                            <td class="p-4">
+                                <button onclick="sell('${docSnap.id}', ${d.stock}, ${d.sold})" class="text-blue-600 font-bold mr-2">賣出</button>
+                                <button onclick="del('${docSnap.id}')" class="text-red-400 text-xs">刪除</button>
+                            </td>
+                        </tr>`;
+                });
+                document.getElementById('totalCostDisplay').innerText = `$${tCost.toLocaleString()}`;
+                document.getElementById('totalProjectedProfit').innerText = `$${tProfit.toLocaleString()}`;
+                document.getElementById('alertCount').innerText = `${alertC} 項`;
+            });
+        }
+
+        window.sell = async (id, s, sold) => {
+            if(s > 0) await updateDoc(doc(db, "products", id), { stock: s - 1, sold: (sold || 0) + 1 });
+            else alert("沒庫存了");
+        };
+        window.del = async (id) => { if(confirm("刪除？")) await deleteDoc(doc(db, "products", id)); };
+    </script>
+</body>
+</html>
